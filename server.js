@@ -9,6 +9,16 @@ dotenv.config();
 
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
+// Import Vercel helper
+try {
+    const vercelHelper = require('./helpers/vercel-config');
+    if (process.env.VERCEL === '1') {
+        vercelHelper.logVercelEnvironment();
+    }
+} catch (err) {
+    console.log('Vercel helper not available:', err.message);
+}
+
 // Initialize Firebase Admin SDK
 let serviceAccount;
 try {
@@ -33,6 +43,12 @@ const db = admin.firestore();
 
 const app = express();
 
+// Add request logging middleware
+app.use((req, res, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+    next();
+});
+
 // Use raw body for webhook route
 app.use((req, res, next) => {
     if (req.originalUrl === '/api/payment/webhook') {
@@ -44,9 +60,50 @@ app.use((req, res, next) => {
 
 app.use(cors({ origin: process.env.FRONTEND_URL }));
 
+// Debug endpoint to check environment variables (EXCLUDE SENSITIVE KEYS)
+app.get('/debug', (req, res) => {
+    res.json({
+        environment: process.env.NODE_ENV,
+        vercel: {
+            is_vercel: !!process.env.VERCEL,
+            env: process.env.VERCEL_ENV,
+            region: process.env.VERCEL_REGION,
+            url: process.env.VERCEL_URL
+        },
+        frontend_url: process.env.FRONTEND_URL,
+        firebase_setup: !!admin.apps.length,
+        stripe_setup: !!stripe,
+        port: process.env.PORT || 3001,
+        routes: [
+            { method: 'GET', path: '/health' },
+            { method: 'GET', path: '/debug' },
+            { method: 'POST', path: '/api/payment/create-intent' },
+            { method: 'GET', path: '/api/payment/:paymentIntentId' },
+            { method: 'POST', path: '/api/payment/refund' },
+            { method: 'POST', path: '/api/payment/webhook' }
+        ]
+    });
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
     res.status(200).send('Server is running');
+});
+
+// Catch-all route for undefined routes
+app.use('*', (req, res) => {
+    console.log(`Route not found: ${req.method} ${req.originalUrl}`);
+    res.status(404).json({ error: `Cannot ${req.method} ${req.originalUrl}` });
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error(`Error processing ${req.method} ${req.url}:`, err);
+    res.status(500).json({
+        error: 'Internal Server Error',
+        message: err.message,
+        path: req.path
+    });
 });
 
 // Create payment intent endpoint
@@ -335,13 +392,23 @@ async function handleRefund(refundData) {
     }
 }
 
-// Start the server
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
-
 // Error handling for unhandled promises
 process.on('unhandledRejection', (reason, promise) => {
     console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
+
+// Only start the server if this file is run directly (not imported via require)
+if (require.main === module) {
+    // Start the server
+    const PORT = process.env.PORT || 3001;
+    app.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
+        console.log(`NODE_ENV: ${process.env.NODE_ENV}`);
+        console.log(`CORS allowed origin: ${process.env.FRONTEND_URL}`);
+        console.log(`Firebase initialized: ${!!admin.apps.length}`);
+        console.log(`Stripe initialized: ${!!stripe}`);
+    });
+}
+
+// Export the app for serverless environments like Vercel
+module.exports = app;

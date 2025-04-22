@@ -5,9 +5,22 @@
         "use": "@vercel/node"
     }],
     "routes": [{
-        "src": "/(.*)",
-        "dest": "/server.js"
-    }],
+            "src": "/health",
+            "dest": "/server.js"
+        },
+        {
+            "src": "/debug",
+            "dest": "/server.js"
+        },
+        {
+            "src": "/api/(.*)",
+            "dest": "/server.js"
+        },
+        {
+            "src": "/(.*)",
+            "dest": "/server.js"
+        }
+    ],
     "env": {
         "STRIPE_SECRET_KEY": "@stripe_secret_key",
         "STRIPE_WEBHOOK_SECRET": "@stripe_webhook_secret",
